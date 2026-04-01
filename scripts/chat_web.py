@@ -317,11 +317,13 @@ async def chat_completions(request: ChatRequest):
     # Basic validation to prevent abuse
     validate_chat_request(request)
 
-    # Log incoming conversation to console
-    logger.info("="*20)
+    # Log request metadata at INFO level; full content only at DEBUG
+    total_chars = sum(len(m.content) for m in request.messages)
+    logger.info(f"Chat request: {len(request.messages)} messages, {total_chars} chars total")
+    logger.debug("="*20)
     for i, message in enumerate(request.messages):
-        logger.info(f"[{message.role.upper()}]: {message.content}")
-    logger.info("-"*20)
+        logger.debug(f"[{message.role.upper()}]: {message.content}")
+    logger.debug("-"*20)
 
     # Acquire a worker from the pool (will wait if all are busy)
     worker_pool = app.state.worker_pool
@@ -365,10 +367,11 @@ async def chat_completions(request: ChatRequest):
                         response_tokens.append(chunk_data["token"])
                     yield chunk
             finally:
-                # Log the assistant response to console
+                # Log response metadata at INFO; full content only at DEBUG
                 full_response = "".join(response_tokens)
-                logger.info(f"[ASSISTANT] (GPU {worker.gpu_id}): {full_response}")
-                logger.info("="*20)
+                logger.info(f"Response complete: GPU {worker.gpu_id}, {len(full_response)} chars")
+                logger.debug(f"[ASSISTANT] (GPU {worker.gpu_id}): {full_response}")
+                logger.debug("="*20)
                 # Release worker back to pool after streaming is done
                 await worker_pool.release_worker(worker)
 

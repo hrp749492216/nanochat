@@ -172,20 +172,36 @@ def compute_init(device_type="cuda"): # cuda|cpu|mps
     if device_type == "cuda":
         torch.backends.fp32_precision = "tf32" # uses tf32 instead of fp32 for matmuls
 
-    # Distributed setup: Distributed Data Parallel (DDP), optional, and requires CUDA
-    is_ddp_requested, ddp_rank, ddp_local_rank, ddp_world_size = get_dist_info()
-    if is_ddp_requested and device_type == "cuda":
+    # Distributed setup: Distributed Data Parallel (DDP), optional
+    ddp_requested, ddp_rank, ddp_local_rank, ddp_world_size = get_dist_info()
+    ddp_active = False
+    if ddp_requested and device_type == "cuda":
         device = torch.device("cuda", ddp_local_rank)
         torch.cuda.set_device(device)  # make "cuda" default to this device
         dist.init_process_group(backend="nccl", device_id=device)
         dist.barrier()
+        ddp_active = True
+    elif ddp_requested and device_type == "cpu":
+        # CPU-only DDP uses the gloo backend
+        device = torch.device("cpu")
+        dist.init_process_group(backend="gloo")
+        dist.barrier()
+        ddp_active = True
+    elif ddp_requested:
+        # DDP requested but device (e.g. mps) doesn't support it
+        logger.warning(
+            f"DDP was requested but device type '{device_type}' does not support it. "
+            "Falling back to single-process mode."
+        )
+        device = torch.device(device_type)
+        ddp_rank, ddp_local_rank, ddp_world_size = 0, 0, 1
     else:
-        device = torch.device(device_type) # mps|cpu
+        device = torch.device(device_type)
 
     if ddp_rank == 0:
         logger.info(f"Distributed world size: {ddp_world_size}")
 
-    return is_ddp_requested, ddp_rank, ddp_local_rank, ddp_world_size, device
+    return ddp_active, ddp_rank, ddp_local_rank, ddp_world_size, device
 
 def compute_cleanup():
     """Companion function to compute_init, to clean things up before script exit"""
